@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Banking System - Welcome</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <style>
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 40px 20px;
+      text-align: center;
+    }
+
+    .welcome-card {
+      background-color: #ffffff;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      padding: 30px;
+      margin-bottom: 30px;
+    }
+
+    .welcome-title {
+      font-size: 28px;
+      color: #2c3e50;
+      margin-bottom: 20px;
+    }
+
+    .welcome-subtitle {
+      font-size: 18px;
+      color: #7f8c8d;
+      margin-bottom: 30px;
+    }
+
+    .btn-dashboard {
+      display: inline-block;
+      background-color: #3498db;
+      color: white;
+      text-decoration: none;
+      padding: 12px 24px;
+      border-radius: 4px;
+      font-weight: bold;
+      transition: background-color 0.3s;
+    }
+
+    .btn-dashboard:hover {
+      background-color: #2980b9;
+    }
+
+    .features {
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      margin-top: 30px;
+    }
+
+    .feature {
+      width: 30%;
+      background-color: #f8f9fa;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+
+    .feature-icon {
+      font-size: 32px;
+      margin-bottom: 15px;
+    }
+
+    .feature-title {
+      font-size: 18px;
+      margin-bottom: 10px;
+      color: #2c3e50;
+    }
+
+    .feature-desc {
+      font-size: 14px;
+      color: #7f8c8d;
+    }
+
+    @media (max-width: 768px) {
+      .feature {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <div class="welcome-card">
+    <h1 class="welcome-title">Welcome to the Banking System</h1>
+    <p class="welcome-subtitle">You are logged in as Administrator</p>
+    <a href="dashboard/home.jsp" class="btn-dashboard">Go to Dashboard</a>
+  </div>
+
+  <div class="features">
+    <div class="feature">
+      <div class="feature-icon">💰</div>
+      <h3 class="feature-title">Account Management</h3>
+      <p class="feature-desc">View account details, balance, and transaction history.</p>
+    </div>
+
+    <div class="feature">
+      <div class="feature-icon">🔄</div>
+      <h3 class="feature-title">Transactions</h3>
+      <p class="feature-desc">Make deposits, withdrawals, and transfers easily.</p>
+    </div>
+
+    <div class="feature">
+      <div class="feature-icon">📊</div>
+      <h3 class="feature-title">Financial Overview</h3>
+      <p class="feature-desc">Get insights into your banking activities.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Check if user is logged in, redirect to login page if not
+  window.onload = function() {
+    // This is a client-side check that complements server-side security
+    // You should always have proper server-side authentication checks
+    if (!sessionStorage.getItem("loggedIn")) {
+      // Optional: uncomment this if you want client-side redirect
+      // window.location.href = "login.html";
+    }
+  }
+</script>
+</body>
+</html>
