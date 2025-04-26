@@ -1,384 +1,227 @@
 package com.bankapp.service;
-import java.util.List;
-import com.bankapp.model.account.Account;
-import com.bankapp.model.account.CheckingAccount;
-import com.bankapp.model.account.LoanAccount;
-import com.bankapp.model.account.SavingsAccount;
+
+import com.bankapp.model.entity.AccountEntity;
+import com.bankapp.model.entity.TransactionEntity;
 import com.bankapp.model.exception.AccountNotFoundException;
 import com.bankapp.model.exception.BankOperationException;
 import com.bankapp.model.exception.InsufficientFundsException;
 import com.bankapp.model.repository.AccountRepository;
 import com.bankapp.model.repository.TransactionRepository;
-import com.bankapp.model.transaction.Transaction;
-import com.bankapp.model.transaction.Transaction.TransactionType;
 import com.bankapp.util.AuditLogger;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityTransaction;
+import java.util.List;
 
 public class AccountService {
     private final AccountRepository accountRepository;
     private final TransactionRepository transactionRepository;
-    public AccountService(AccountRepository accountRepository, TransactionRepository transactionRepository) {
+    private final EntityManager entityManager;
+
+    public AccountService(AccountRepository accountRepository, TransactionRepository transactionRepository, 
+                         EntityManager entityManager) {
         this.accountRepository = accountRepository;
         this.transactionRepository = transactionRepository;
-    }
-    public SavingsAccount createSavingsAccount(String customerId, double initialBalance, double interestRate, String username) {
-        validateAmount(initialBalance, "Initial balance");
-
-        SavingsAccount account = new SavingsAccount(customerId, initialBalance, interestRate);
-        account.updateAuditInfo(username);
-
-        boolean saved = accountRepository.save(account);
-        if (!saved) {
-            throw new BankOperationException("Failed to create savings account");
-        }
-
-        // Record the initial deposit transaction
-        if (initialBalance > 0) {
-            Transaction transaction = new Transaction(
-                    account.getAccountId(),
-                    TransactionType.DEPOSIT,
-                    initialBalance,
-                    "Initial deposit");
-            transaction.updateAuditInfo(username);
-            transactionRepository.save(transaction);
-        }
-
-        AuditLogger.log(username, "Created savings account: " + account.getAccountId());
-        return account;
+        this.entityManager = entityManager;
     }
 
-    /**
-     * Create a new checking account
-     *
-     * @param customerId The customer ID
-     * @param initialBalance The initial balance
-     * @param overdraftLimit The overdraft limit
-     * @param overdraftFee The overdraft fee
-     * @param username The username of the creator
-     * @return The new account
-     */
-    public CheckingAccount createCheckingAccount(String customerId, double initialBalance,
-                                                 double overdraftLimit, double overdraftFee, String username) {
-        validateAmount(initialBalance, "Initial balance");
+    public AccountEntity createAccount(AccountEntity account, String username) {
+        EntityTransaction tx = entityManager.getTransaction();
+        try {
+            tx.begin();
+            
+            validateAmount(account.getBalance(), "Initial balance");
+            account.updateAuditInfo(username);
+            account = accountRepository.save(account);
 
-        CheckingAccount account = new CheckingAccount(customerId, initialBalance, overdraftLimit, overdraftFee);
-        account.updateAuditInfo(username);
+            // Record initial deposit transaction if balance > 0
+            if (account.getBalance() > 0) {
+                TransactionEntity transaction = new TransactionEntity();
+                transaction.setAccount(account);
+                transaction.setAmount(account.getBalance());
+                transaction.setType("DEPOSIT");
+                transaction.setDescription("Initial deposit");
+                transaction.updateAuditInfo(username);
+                transactionRepository.save(transaction);
+            }
 
-        boolean saved = accountRepository.save(account);
-        if (!saved) {
-            throw new BankOperationException("Failed to create checking account");
+            tx.commit();
+            AuditLogger.log(username, "Created account: " + account.getAccountId());
+            return account;
+        } catch (Exception e) {
+            if (tx.isActive()) {
+                tx.rollback();
+            }
+            throw e;
         }
-
-        // Record the initial deposit transaction
-        if (initialBalance > 0) {
-            Transaction transaction = new Transaction(
-                    account.getAccountId(),
-                    TransactionType.DEPOSIT,
-                    initialBalance,
-                    "Initial deposit");
-            transaction.updateAuditInfo(username);
-            transactionRepository.save(transaction);
-        }
-
-        AuditLogger.log(username, "Created checking account: " + account.getAccountId());
-        return account;
     }
 
-    /**
-     * Create a new loan account
-     *
-     * @param customerId The customer ID
-     * @param loanAmount The loan amount
-     * @param interestRate The interest rate
-     * @param termMonths The loan term in months
-     * @param username The username of the creator
-     * @return The new account
-     */
-    public LoanAccount createLoanAccount(String customerId, double loanAmount,
-                                         double interestRate, int termMonths, String username) {
-        validateAmount(loanAmount, "Loan amount");
-
-        LoanAccount account = new LoanAccount(customerId, loanAmount, interestRate, termMonths);
-        account.updateAuditInfo(username);
-
-        boolean saved = accountRepository.save(account);
-        if (!saved) {
-            throw new BankOperationException("Failed to create loan account");
-        }
-
-        // Record the loan disbursement transaction
-        Transaction transaction = new Transaction(
-                account.getAccountId(),
-                TransactionType.DEPOSIT,
-                loanAmount,
-                "Loan disbursement");
-        transaction.updateAuditInfo(username);
-        transactionRepository.save(transaction);
-
-        AuditLogger.log(username, "Created loan account: " + account.getAccountId());
-        return account;
+    public AccountEntity getAccount(String accountId) {
+        return accountRepository.findById(accountId)
+                .orElseThrow(() -> new AccountNotFoundException("Account not found: " + accountId));
     }
 
-    /**
-     * Get account by ID
-     *
-     * @param accountId The account ID
-     * @return The account
-     * @throws AccountNotFoundException if account not found
-     */
-    public Account getAccount(String accountId) {
-        return accountRepository.findById(accountId);
-    }
-
-    /**
-     * Get accounts for a customer
-     *
-     * @param customerId The customer ID
-     * @return List of accounts
-     */
-    public List<Account> getAccountsByCustomer(String customerId) {
+    public List<AccountEntity> getAccountsByCustomer(String customerId) {
         return accountRepository.findByCustomerId(customerId);
     }
 
-    /**
-     * Deposit money into an account
-     *
-     * @param accountId The account ID
-     * @param amount The amount to deposit
-     * @param description The transaction description
-     * @param username The username of the depositor
-     * @return The updated account
-     * @throws AccountNotFoundException if account not found
-     * @throws BankOperationException if deposit fails
-     */
-    public Account deposit(String accountId, double amount, String description, String username) {
+    public List<AccountEntity> getAllAccounts() {
+        return accountRepository.findAll();
+    }
+
+    public AccountEntity deposit(String accountId, double amount, String description, String username) {
         validateAmount(amount, "Deposit amount");
 
-        Account account = accountRepository.findById(accountId);
-
+        EntityTransaction tx = entityManager.getTransaction();
         try {
-            // Special handling for loan accounts
-            if (account instanceof LoanAccount) {
-                ((LoanAccount) account).makePayment(amount);
-            } else {
-                account.deposit(amount);
-            }
-
+            tx.begin();
+            
+            AccountEntity account = getAccount(accountId);
+            account.setBalance(account.getBalance() + amount);
             account.updateAuditInfo(username);
-            accountRepository.update(account);
+            account = accountRepository.save(account);
 
-            // Record the transaction
-            Transaction transaction = new Transaction(
-                    accountId,
-                    account instanceof LoanAccount ? TransactionType.PAYMENT : TransactionType.DEPOSIT,
-                    amount,
-                    description);
+            TransactionEntity transaction = new TransactionEntity();
+            transaction.setAccount(account);
+            transaction.setAmount(amount);
+            transaction.setType("DEPOSIT");
+            transaction.setDescription(description);
             transaction.updateAuditInfo(username);
             transactionRepository.save(transaction);
 
+            tx.commit();
             AuditLogger.log(username, "Deposited " + amount + " to account: " + accountId);
             return account;
-
         } catch (Exception e) {
+            if (tx.isActive()) {
+                tx.rollback();
+            }
             throw new BankOperationException("Deposit failed: " + e.getMessage(), e);
         }
     }
 
-    /**
-     * Withdraw money from an account
-     *
-     * @param accountId The account ID
-     * @param amount The amount to withdraw
-     * @param description The transaction description
-     * @param username The username of the withdrawer
-     * @return The updated account
-     * @throws AccountNotFoundException if account not found
-     * @throws InsufficientFundsException if funds are insufficient
-     * @throws BankOperationException if withdrawal fails
-     */
-    public Account withdraw(String accountId, double amount, String description, String username) {
+    public AccountEntity withdraw(String accountId, double amount, String description, String username) {
         validateAmount(amount, "Withdrawal amount");
 
-        Account account = accountRepository.findById(accountId);
-
+        EntityTransaction tx = entityManager.getTransaction();
         try {
-            // Loan accounts cannot be withdrawn from
-            if (account instanceof LoanAccount) {
-                throw new UnsupportedOperationException("Cannot withdraw from a loan account");
+            tx.begin();
+            
+            AccountEntity account = getAccount(accountId);
+            
+            if (account.getBalance() < amount) {
+                throw new InsufficientFundsException("Insufficient funds for withdrawal");
             }
 
-            account.withdraw(amount);
+            account.setBalance(account.getBalance() - amount);
             account.updateAuditInfo(username);
-            accountRepository.update();
-            accountRepository.update(account);
+            account = accountRepository.save(account);
 
-            // Record the transaction
-            Transaction transaction = new Transaction(
-                    accountId,
-                    TransactionType.WITHDRAWAL,
-                    amount,
-                    description);
+            TransactionEntity transaction = new TransactionEntity();
+            transaction.setAccount(account);
+            transaction.setAmount(amount);
+            transaction.setType("WITHDRAWAL");
+            transaction.setDescription(description);
             transaction.updateAuditInfo(username);
             transactionRepository.save(transaction);
 
+            tx.commit();
             AuditLogger.log(username, "Withdrew " + amount + " from account: " + accountId);
             return account;
-
         } catch (InsufficientFundsException e) {
-            throw e;  // Rethrow specific exception
+            if (tx.isActive()) {
+                tx.rollback();
+            }
+            throw e;
         } catch (Exception e) {
+            if (tx.isActive()) {
+                tx.rollback();
+            }
             throw new BankOperationException("Withdrawal failed: " + e.getMessage(), e);
         }
     }
 
-    /**
-     * Transfer money between accounts
-     *
-     * @param fromAccountId The source account ID
-     * @param toAccountId The target account ID
-     * @param amount The amount to transfer
-     * @param description The transaction description
-     * @param username The username of the transferer
-     * @return The updated source account
-     * @throws AccountNotFoundException if either account not found
-     * @throws InsufficientFundsException if funds are insufficient
-     * @throws BankOperationException if transfer fails
-     */
-    public Account transfer(String fromAccountId, String toAccountId, double amount, String description, String username) {
+    public AccountEntity transfer(String fromAccountId, String toAccountId, double amount, String description, String username) {
         validateAmount(amount, "Transfer amount");
 
-        Account fromAccount = accountRepository.findById(fromAccountId);
-        Account toAccount = accountRepository.findById(toAccountId);
-
+        EntityTransaction tx = entityManager.getTransaction();
         try {
-            // Loan accounts have special handling
-            if (fromAccount instanceof LoanAccount) {
-                throw new UnsupportedOperationException("Cannot transfer from a loan account");
+            tx.begin();
+            
+            AccountEntity fromAccount = getAccount(fromAccountId);
+            AccountEntity toAccount = getAccount(toAccountId);
+
+            if (fromAccount.getBalance() < amount) {
+                throw new InsufficientFundsException("Insufficient funds for transfer");
             }
 
-            // Withdraw from source account
-            fromAccount.withdraw(amount);
+            // Update source account
+            fromAccount.setBalance(fromAccount.getBalance() - amount);
             fromAccount.updateAuditInfo(username);
-            accountRepository.update(fromAccount);
+            fromAccount = accountRepository.save(fromAccount);
 
-            // Deposit to target account (with special handling for loan)
-            if (toAccount instanceof LoanAccount) {
-                ((LoanAccount) toAccount).makePayment(amount);
-            } else {
-                toAccount.deposit(amount);
-            }
+            // Update target account
+            toAccount.setBalance(toAccount.getBalance() + amount);
             toAccount.updateAuditInfo(username);
-            accountRepository.update(toAccount);
+            toAccount = accountRepository.save(toAccount);
 
-            // Record the transfer transactions
-            Transaction fromTransaction = Transaction.createTransfer(
-                    fromAccountId,
-                    toAccountId,
-                    amount,
-                    description);
-            fromTransaction.updateAuditInfo(username);
-            transactionRepository.save(fromTransaction);
+            // Record transfer transaction
+            TransactionEntity transaction = new TransactionEntity();
+            transaction.setAccount(fromAccount);
+            transaction.setAmount(amount);
+            transaction.setType("TRANSFER");
+            transaction.setDescription(description + " (To: " + toAccountId + ")");
+            transaction.updateAuditInfo(username);
+            transactionRepository.save(transaction);
 
-            // Create a corresponding deposit transaction for the target account
-            Transaction toTransaction = Transaction.createTransfer(
-                    toAccountId,
-                    fromAccountId,
-                    amount,
-                    description + " (from " + fromAccountId + ")");
-            toTransaction.updateAuditInfo(username);
-            transactionRepository.save(toTransaction);
-
-            AuditLogger.log(username, "Transferred " + amount + " from account: " + fromAccountId + " to account: " + toAccountId);
+            tx.commit();
+            AuditLogger.log(username, "Transferred " + amount + " from account " + fromAccountId + " to " + toAccountId);
             return fromAccount;
-
         } catch (InsufficientFundsException e) {
-            throw e;  // Rethrow specific exception
+            if (tx.isActive()) {
+                tx.rollback();
+            }
+            throw e;
         } catch (Exception e) {
+            if (tx.isActive()) {
+                tx.rollback();
+            }
             throw new BankOperationException("Transfer failed: " + e.getMessage(), e);
         }
     }
 
-    /**
-     * Get transactions for an account
-     *
-     * @param accountId The account ID
-     * @return List of transactions
-     */
-    public List<Transaction> getTransactions(String accountId) {
+    public List<TransactionEntity> getTransactions(String accountId) {
         return transactionRepository.findByAccountId(accountId);
     }
 
-    /**
-     * Close an account
-     *
-     * @param accountId The account ID
-     * @param username The username of the closer
-     * @return true if successful
-     * @throws AccountNotFoundException if account not found
-     * @throws BankOperationException if balance is not zero or close fails
-     */
     public boolean closeAccount(String accountId, String username) {
-        Account account = accountRepository.findById(accountId);
+        EntityTransaction tx = entityManager.getTransaction();
+        try {
+            tx.begin();
+            
+            AccountEntity account = getAccount(accountId);
+            
+            if (account.getBalance() != 0) {
+                throw new BankOperationException("Cannot close account with non-zero balance");
+            }
 
-        // Cannot close account with balance
-        if (account.getBalance() != 0) {
-            throw new BankOperationException("Cannot close account with non-zero balance: " + account.getBalance());
-        }
-
-        boolean deleted = accountRepository.delete(accountId);
-        if (deleted) {
-            AuditLogger.log(username, "Closed account: " + accountId);
-        }
-
-        return deleted;
-    }
-
-    /**
-     * Calculate interest for an account
-     *
-     * @param accountId The account ID
-     * @param username The username of the processor
-     * @return The updated account
-     */
-    public Account calculateInterest(String accountId, String username) {
-        Account account = accountRepository.findById(accountId);
-
-        // Only calculate interest for appropriate account types
-        if (account instanceof SavingsAccount || account instanceof LoanAccount) {
-            double oldBalance = account.getBalance();
-            account.calculateInterest();
-            double interestAmount = Math.abs(account.getBalance() - oldBalance);
-
+            account.setStatus("CLOSED");
             account.updateAuditInfo(username);
-            accountRepository.update(account);
+            accountRepository.save(account);
 
-            // Record the interest transaction
-            TransactionType type = account instanceof SavingsAccount ?
-                    TransactionType.INTEREST : TransactionType.FEE;
-
-            Transaction transaction = new Transaction(
-                    accountId,
-                    type,
-                    interestAmount,
-                    "Interest calculation");
-            transaction.updateAuditInfo(username);
-            transactionRepository.save(transaction);
-
-            AuditLogger.log(username, "Calculated interest for account: " + accountId);
+            tx.commit();
+            AuditLogger.log(username, "Closed account: " + accountId);
+            return true;
+        } catch (Exception e) {
+            if (tx.isActive()) {
+                tx.rollback();
+            }
+            throw new BankOperationException("Failed to close account: " + e.getMessage(), e);
         }
-
-        return account;
     }
 
-    /**
-     * Validate that an amount is positive
-     *
-     * @param amount The amount to validate
-     * @param fieldName The name of the field
-     * @throws IllegalArgumentException if amount is not positive
-     */
     private void validateAmount(double amount, String fieldName) {
-        if (amount <= 0) {
-            throw new IllegalArgumentException(fieldName + " must be positive");
+        if (amount < 0) {
+            throw new BankOperationException(fieldName + " cannot be negative");
         }
     }
 }

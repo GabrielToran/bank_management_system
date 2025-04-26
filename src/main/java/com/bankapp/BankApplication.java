@@ -1,17 +1,11 @@
 package com.bankapp;
 
-import java.sql.Connection;
-import java.sql.SQLException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import com.bankapp.model.repository.AccountRepository;
-import com.bankapp.model.repository.CustomerRepository;
-import com.bankapp.model.repository.TransactionRepository;
+import com.bankapp.model.repository.*;
 import com.bankapp.service.AccountService;
 import com.bankapp.service.CustomerService;
-import com.bankapp.service.TransactionService;
-import com.bankapp.util.DatabaseUtil;
 import com.bankapp.util.AuditLogger;
 
 /**
@@ -35,7 +29,6 @@ public class BankApplication {
     private TransactionService transactionService;
 
     // Utilities
-    private DatabaseUtil databaseUtil;
     private AuditLogger auditLogger;
 
     /**
@@ -64,16 +57,12 @@ public class BankApplication {
 
         try {
             // Initialize utilities
-            databaseUtil = new DatabaseUtil();
             auditLogger = new AuditLogger();
 
-            // Initialize database connection
-            Connection connection = databaseUtil.getConnection();
-
             // Initialize repositories
-            accountRepository = new AccountRepository(connection);
-            customerRepository = new CustomerRepository(connection);
-            transactionRepository = new TransactionRepository(connection);
+            accountRepository = new JpaAccountRepository();
+            customerRepository = new JpaCustomerRepository();
+            transactionRepository = new JpaTransactionRepository();
 
             // Initialize services
             accountService = new AccountService(accountRepository, transactionRepository);
@@ -81,7 +70,7 @@ public class BankApplication {
             transactionService = new TransactionService(transactionRepository, accountRepository, auditLogger);
 
             LOGGER.info("Bank Management System initialized successfully");
-        } catch (SQLException e) {
+        } catch (Exception e) {
             LOGGER.log(Level.SEVERE, "Failed to initialize Bank Management System", e);
             throw new RuntimeException("Failed to initialize application", e);
         }
@@ -112,14 +101,6 @@ public class BankApplication {
     }
 
     /**
-     * Gets the database utility
-     * @return DatabaseUtil
-     */
-    public DatabaseUtil getDatabaseUtil() {
-        return databaseUtil;
-    }
-
-    /**
      * Gets the audit logger
      * @return AuditLogger
      */
@@ -134,11 +115,17 @@ public class BankApplication {
         LOGGER.info("Shutting down Bank Management System");
 
         try {
-            if (databaseUtil != null) {
-                databaseUtil.closeConnection();
+            if (accountRepository instanceof JpaAccountRepository) {
+                ((JpaAccountRepository) accountRepository).close();
+            }
+            if (customerRepository instanceof JpaCustomerRepository) {
+                ((JpaCustomerRepository) customerRepository).close();
+            }
+            if (transactionRepository instanceof JpaTransactionRepository) {
+                ((JpaTransactionRepository) transactionRepository).close();
             }
             LOGGER.info("Bank Management System shutdown completed");
-        } catch (SQLException e) {
+        } catch (Exception e) {
             LOGGER.log(Level.SEVERE, "Error during application shutdown", e);
         }
     }

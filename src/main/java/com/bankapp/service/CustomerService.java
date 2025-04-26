@@ -10,79 +10,56 @@ import com.bankapp.model.repository.CustomerRepository;
 import com.bankapp.model.repository.TransactionRepository;
 import com.bankapp.model.transaction.Transaction;
 import com.bankapp.util.AuditLogger;
+import com.bankapp.model.entity.CustomerEntity;
+import com.bankapp.model.exception.CustomerNotFoundException;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityTransaction;
 
 public class CustomerService {
     private final CustomerRepository customerRepository;
     private final AccountRepository accountRepository;
     private final TransactionRepository transactionRepository;
+    private final EntityManager entityManager;
 
-    /**
-     * Creates a new CustomerService
-     *
-     * @param customerRepository The customer repository
-     * @param accountRepository The account repository
-     * @param transactionRepository The transaction repository
-     */
+
     public CustomerService(CustomerRepository customerRepository, AccountRepository accountRepository,
-                           TransactionRepository transactionRepository) {
+                           TransactionRepository transactionRepository, EntityManager entityManager) {
         this.customerRepository = customerRepository;
         this.accountRepository = accountRepository;
         this.transactionRepository = transactionRepository;
+        this.entityManager = entityManager;
     }
 
-    /**
-     * Create a new customer
-     *
-     * @param firstName The first name
-     * @param lastName The last name
-     * @param email The email address
-     * @param phone The phone number
-     * @param dateOfBirth The date of birth
-     * @param address The physical address
-     * @param username The username for login
-     * @param password The password for login
-     * @param createdBy The username of the creator
-     * @return The new customer
-     */
-    public Customer createCustomer(String firstName, String lastName, String email,
-                                   String phone, LocalDate dateOfBirth, String address,
-                                   String username, String password, String createdBy) {
+    public CustomerService(CustomerRepository customerRepository) {
 
-        // Validate input
-        if (firstName == null || firstName.trim().isEmpty()) {
-            throw new IllegalArgumentException("First name is required");
-        }
-        if (lastName == null || lastName.trim().isEmpty()) {
-            throw new IllegalArgumentException("Last name is required");
-        }
-        if (username == null || username.trim().isEmpty()) {
-            throw new IllegalArgumentException("Username is required");
-        }
-        if (password == null || password.trim().isEmpty()) {
-            throw new IllegalArgumentException("Password is required");
-        }
+    }
 
-        // Check if username already exists
-        Customer existingCustomer = customerRepository.findByUsername(username);
-        if (existingCustomer != null) {
-            throw new BankOperationException("Username already exists: " + username);
+
+    public CustomerEntity createCustomer(CustomerEntity customer, String username) {
+        EntityTransaction tx = entityManager.getTransaction();
+        try {
+            tx.begin();
+            
+            // Check if username or email already exists
+            if (customerRepository.findByUsername(customer.getUsername()).isPresent()) {
+                throw new IllegalArgumentException("Username already exists");
+            }
+            if (customerRepository.findByEmail(customer.getEmail()).isPresent()) {
+                throw new IllegalArgumentException("Email already exists");
+            }
+
+            customer.updateAuditInfo(username);
+            customer = customerRepository.save(customer);
+
+            tx.commit();
+            AuditLogger.log(username, "Created customer: " + customer.getCustomerId());
+            return customer;
+        } catch (Exception e) {
+            if (tx.isActive()) {
+                tx.rollback();
+            }
+            throw e;
         }
-
-        // Create the customer
-        String id = UUID.randomUUID().toString();
-        String customerId = UUID.randomUUID().toString();
-
-        Customer customer = new Customer(id, firstName, lastName, email, phone,
-                dateOfBirth, address, customerId, username, password);
-        customer.updateAuditInfo(createdBy);
-
-        boolean saved = customerRepository.save(customer);
-        if (!saved) {
-            throw new BankOperationException("Failed to create customer");
-        }
-
-        AuditLogger.log(createdBy, "Created customer: " + customer.getCustomerId());
-        return customer;
     }
 
     /**
@@ -91,17 +68,9 @@ public class CustomerService {
      * @param customerId The customer ID
      * @return The customer or null if not found
      */
-    public Customer getCustomer(String customerId) {
-        Customer customer = customerRepository.findById(customerId);
-        if (customer == null) {
-            throw new BankOperationException("Customer not found with ID: " + customerId);
-        }
-
-        // Load accounts for this customer
-        List<Account> accounts = accountRepository.findByCustomerId(customerId);
-        accounts.forEach(customer::addAccount);
-
-        return customer;
+    public CustomerEntity getCustomerById(String customerId) {
+        return customerRepository.findById(customerId)
+                .orElseThrow(() -> new CustomerNotFoundException("Customer not found: " + customerId));
     }
 
     /**
@@ -110,41 +79,42 @@ public class CustomerService {
      * @param username The username
      * @return The customer or null if not found
      */
-    public Customer getCustomerByUsername(String username) {
-        Customer customer = customerRepository.findByUsername(username);
-        if (customer == null) {
-            throw new BankOperationException("Customer not found with username: " + username);
-        }
-
-        // Load accounts for this customer
-        List<Account> accounts = accountRepository.findByCustomerId(customer.getCustomerId());
-        accounts.forEach(customer::addAccount);
-
-        return customer;
+    public CustomerEntity getCustomerByUsername(String username) {
+        return customerRepository.findByUsername(username)
+                .orElseThrow(() -> new CustomerNotFoundException("Customer not found with username: " + username));
     }
 
-    /**
-     * Update customer information
-     *
-     * @param customer The customer to update
-     * @param modifiedBy The username of the modifier
-     * @return The updated customer
-     */
-    public Customer updateCustomer(Customer customer, String modifiedBy) {
-        // Validate input
-        if (customer == null) {
-            throw new IllegalArgumentException("Customer cannot be null");
+
+    public CustomerEntity updateCustomer(CustomerEntity customer, String username) {
+        EntityTransaction tx = entityManager.getTransaction();
+        try {
+            tx.begin();
+            
+            // Verify customer exists
+            CustomerEntity existingCustomer = getCustomerById(customer.getCustomerId());
+            
+            // Check if new username or email conflicts with other customers
+            if (!existingCustomer.getUsername().equals(customer.getUsername()) &&
+                customerRepository.findByUsername(customer.getUsername()).isPresent()) {
+                throw new IllegalArgumentException("Username already exists");
+            }
+            if (!existingCustomer.getEmail().equals(customer.getEmail()) &&
+                customerRepository.findByEmail(customer.getEmail()).isPresent()) {
+                throw new IllegalArgumentException("Email already exists");
+            }
+
+            customer.updateAuditInfo(username);
+            customer = customerRepository.save(customer);
+
+            tx.commit();
+            AuditLogger.log(username, "Updated customer: " + customer.getCustomerId());
+            return customer;
+        } catch (Exception e) {
+            if (tx.isActive()) {
+                tx.rollback();
+            }
+            throw e;
         }
-
-        customer.updateAuditInfo(modifiedBy);
-
-        boolean updated = customerRepository.update(customer);
-        if (!updated) {
-            throw new BankOperationException("Failed to update customer: " + customer.getCustomerId());
-        }
-
-        AuditLogger.log(modifiedBy, "Updated customer: " + customer.getCustomerId());
-        return customer;
     }
 
     /**
@@ -156,12 +126,12 @@ public class CustomerService {
      * @param modifiedBy The username of the modifier
      * @return The updated customer
      */
-    public Customer changePassword(String customerId, String oldPassword, String newPassword, String modifiedBy) {
-        Customer customer = getCustomer(customerId);
+    public CustomerEntity changePassword(String customerId, String oldPassword, String newPassword, String modifiedBy) {
+        CustomerEntity customer = getCustomerById(customerId);
 
         // Validate old password
-        if (!customer.validatePassword(oldPassword)) {
-            throw new BankOperationException("Invalid old password");
+        if (!customer.getPassword().equals(oldPassword)) {
+            throw new IllegalArgumentException("Invalid old password");
         }
 
         // Validate new password
@@ -198,18 +168,33 @@ public class CustomerService {
      * @param password The password
      * @return The authenticated customer or null if authentication fails
      */
-    public Customer authenticate(String username, String password) {
-        Customer customer = customerRepository.findByUsername(username);
-
-        if (customer != null && customer.validatePassword(password)) {
-            // Load accounts for this customer
-            List<Account> accounts = accountRepository.findByCustomerId(customer.getCustomerId());
-            accounts.forEach(customer::addAccount);
-
-            AuditLogger.log(username, "Customer logged in: " + customer.getCustomerId());
-            return customer;
+    public CustomerEntity authenticate(String username, String password) {
+        CustomerEntity customer = getCustomerByUsername(username);
+        if (!customer.getPassword().equals(password)) {
+            throw new IllegalArgumentException("Invalid password");
         }
+        return customer;
+    }
 
-        return null;
+    public void deleteCustomer(String customerId, String username) {
+        EntityTransaction tx = entityManager.getTransaction();
+        try {
+            tx.begin();
+            
+            CustomerEntity customer = getCustomerById(customerId);
+            customerRepository.delete(customerId);
+
+            tx.commit();
+            AuditLogger.log(username, "Deleted customer: " + customerId);
+        } catch (Exception e) {
+            if (tx.isActive()) {
+                tx.rollback();
+            }
+            throw e;
+        }
+    }
+
+    public List<CustomerEntity> getAllCustomers() {
+        return customerRepository.findAll();
     }
 }

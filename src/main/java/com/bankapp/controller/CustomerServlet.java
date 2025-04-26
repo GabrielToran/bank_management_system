@@ -1,63 +1,53 @@
 package com.bankapp.controller;
-import java.io.IOException;
-import java.util.List;
 
+import com.bankapp.model.entity.CustomerEntity;
+import com.bankapp.model.repository.JpaCustomerRepository;
+import com.bankapp.service.CustomerService;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.annotation.WebServlet;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import jakarta.servlet.http.HttpSession;
+import java.io.IOException;
+import java.util.List;
 
-import com.bankapp.model.account.Account;
-import com.bankapp.model.person.Customer;
-import com.bankapp.model.repository.CustomerRepository;
-import com.bankapp.service.CustomerService;
-import com.bankapp.model.repository.AccountRepository;
-import com.bankapp.model.repository.TransactionRepository;
-import com.bankapp.service.AccountService;
-
-@WebServlet("/dashboard")
+@WebServlet("/customers")
 public class CustomerServlet extends HttpServlet {
-    private static final long serialVersionUID = 1L;
-
     private CustomerService customerService;
-    private AccountService accountService;
 
     @Override
-    public void init() throws ServletException {
-        CustomerRepository customerRepository = new CustomerRepository();
-        AccountRepository accountRepository = new AccountRepository();
-        TransactionRepository transactionRepository = new TransactionRepository();
-
-        customerService = new CustomerService(customerRepository, accountRepository, transactionRepository);
-        accountService = new AccountService(accountRepository, transactionRepository);
+    public void init() {
+        JpaCustomerRepository customerRepository = new JpaCustomerRepository();
+        customerService = new CustomerService(customerRepository);
     }
 
-    /**
-     * Display dashboard
-     */
     @Override
-    protected void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
-        HttpSession session = request.getSession(false);
-
-        if (session == null || session.getAttribute("customerId") == null) {
-            response.sendRedirect(request.getContextPath() + "/login");
-            return;
-        }
-
-        try {
-            String customerId = (String) session.getAttribute("customerId");
-            Customer customer = customerService.getCustomer(customerId);
-            List<Account> accounts = accountService.getAccountsByCustomer(customerId);
-
+    protected void doGet(HttpServletRequest request, HttpServletResponse response) 
+            throws ServletException, IOException {
+        String customerId = request.getParameter("id");
+        
+        if (customerId != null) {
+            CustomerEntity customer = customerService.getCustomerById(customerId);
             request.setAttribute("customer", customer);
-            request.setAttribute("accounts", accounts);
-            request.getRequestDispatcher("/dashboard.jsp").forward(request, response);
+            request.getRequestDispatcher("/WEB-INF/views/customer-details.jsp").forward(request, response);
+        } else {
+            List<CustomerEntity> customers = customerService.getAllCustomers();
+            request.setAttribute("customers", customers);
+            request.getRequestDispatcher("/WEB-INF/views/customers.jsp").forward(request, response);
+        }
+    }
 
-        } catch (Exception e) {
-            request.setAttribute("error", "Error loading dashboard: " + e.getMessage());
-            request.getRequestDispatcher("/error.jsp").forward(request, response);
+    @Override
+    protected void doPost(HttpServletRequest request, HttpServletResponse response) 
+            throws ServletException, IOException {
+        // Create new customer logic here
+        // Use customerService.createCustomer()
+    }
+
+    @Override
+    public void destroy() {
+        if (customerService != null) {
+            // Close repository if needed
         }
     }
 }
